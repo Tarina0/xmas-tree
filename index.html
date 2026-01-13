@@ -3,40 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D圣诞树手势交互</title>
+    <title>3D 丰满圣诞树 - 手势控制</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #020202; touch-action: none; font-family: sans-serif; }
         #container { width: 100vw; height: 100vh; }
         
-        /* 手机端摄像头预览窗口：左上角小窗，并镜像 */
+        /* 摄像头预览：保持不变 */
         #video-container { 
             position: absolute; top: 10px; right: 10px; 
-            width: 100px; height: 75px; 
-            border: 1px solid gold; border-radius: 8px; 
+            width: 90px; height: 68px; 
+            border: 2px solid rgba(255, 215, 0, 0.5); border-radius: 8px; 
             overflow: hidden; transform: scaleX(-1); z-index: 100;
+            background: #000;
         }
-        video { width: 100%; height: 100%; object-fit: cover; }
+        video { width: 100%; height: 100%; object-fit: cover; opacity: 0.8; }
 
+        /* UI 优化：增大字体提升手机阅读体验 */
         #ui { 
-            position: absolute; bottom: 30px; width: 100%; 
-            text-align: center; color: gold; pointer-events: none; 
-            text-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            position: absolute; bottom: 40px; width: 100%; 
+            text-align: center; color: #fff; pointer-events: none; 
+            text-shadow: 0 2px 10px rgba(255, 215, 0, 0.6);
         }
-        .hint { font-size: 12px; opacity: 0.8; margin-top: 5px; }
+        #state-text { font-size: 24px; margin: 0; color: gold; letter-spacing: 2px; }
+        .hint { font-size: 14px; opacity: 0.9; margin-top: 10px; color: #ccc;}
         
-        /* 加载提示 */
         #loader {
             position: fixed; inset: 0; background: #000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 1000; color: gold;
+            z-index: 1000; color: gold; transition: opacity 0.5s;
         }
     </style>
 </head>
 <body>
 
 <div id="loader">
-    <p>正在初始化 3D 引擎...</p>
-    <p style="font-size: 12px;">建议在 Chrome/Safari 中打开</p>
+    <h3 style="letter-spacing: 3px;">🎄 GOLDEN TREE 🎄</h3>
+    <p>正在加载 AI 手势模型...</p>
+    <p style="font-size: 12px; opacity: 0.7;">请授予摄像头权限</p>
 </div>
 
 <div id="video-container">
@@ -44,8 +47,8 @@
 </div>
 
 <div id="ui">
-    <h2 id="state-text">加载模型中...</h2>
-    <div class="hint">🖐️张开手：散开 | ✊握拳：聚合 | 🔄移动手：旋转</div>
+    <h2 id="state-text">请举起手掌 👋</h2>
+    <div class="hint">🖐️张开：炸裂散开 | ✊握拳：聚合圣诞树</div>
 </div>
 
 <div id="container"></div>
@@ -71,100 +74,155 @@
     const video = document.getElementById('webcam');
     let currentState = 'FOLD';
 
-    // --- 1. 初始化 3D 场景 ---
-    async function initScene() {
+    // --- 1. 初始化 3D 场景 (核心修改区域) ---
+    function initScene() {
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.z = 20;
+        // 调整相机距离，离得稍远一点以观察全貌
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 28; 
 
-        renderer = new THREE.WebGLRenderer({ antialias: false }); // 手机端关闭原生抗锯齿以提升性能
+        renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        // 限制像素比，防止高分屏手机卡顿，同时让粒子看起来更大
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
         document.getElementById('container').appendChild(renderer.domElement);
 
-        // 辉光效果
+        // 增强辉光：提升强度和半径，营造节日氛围
         const renderScene = new RenderPass(scene, camera);
-        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.8);
+        // strength 1.0 -> 1.2, radius 0.4 -> 0.6
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.6, 0.7);
         composer = new EffectComposer(renderer);
         composer.addPass(renderScene);
         composer.addPass(bloomPass);
 
-        // 粒子系统 (降低数量至1200以适配手机)
-        const count = 1200;
+        // 稍微增加粒子数量以提升密度
+        const count = 1600; 
         const geometry = new THREE.BufferGeometry();
         const pos = new Float32Array(count * 3);
         const colors = new Float32Array(count * 3);
-        const palette = [new THREE.Color(0xffd700), new THREE.Color(0x1a472a), new THREE.Color(0xbc131f)];
+        // 调整配色比例：更多金色和红色，更有节日感
+        const palette = [
+            new THREE.Color(0xffd700), // 金
+            new THREE.Color(0xffd700), // 金 (加倍权重)
+            new THREE.Color(0xbc131f), // 红
+            new THREE.Color(0x0f3b23)  // 深绿
+        ];
 
         for (let i = 0; i < count; i++) {
-            pos[i * 3] = (Math.random() - 0.5) * 30;
-            pos[i * 3 + 1] = (Math.random() - 0.5) * 30;
-            pos[i * 3 + 2] = (Math.random() - 0.5) * 30;
+            // 散开状态的范围加大
+            pos[i * 3] = (Math.random() - 0.5) * 40;
+            pos[i * 3 + 1] = (Math.random() - 0.5) * 40;
+            pos[i * 3 + 2] = (Math.random() - 0.5) * 40;
+            
             const c = palette[Math.floor(Math.random() * palette.length)];
             colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
         }
         geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
+        // --- 核心修改：Shader ---
         const mat = new THREE.ShaderMaterial({
             uniforms: { uTime: { value: 0 }, uProgress: { value: 0 } },
             vertexShader: `
                 varying vec3 vColor;
                 uniform float uTime;
                 uniform float uProgress;
+
+                // 简单的伪随机函数
+                float random(vec2 st) {
+                    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+                }
+
                 void main() {
                     vColor = color;
-                    float h = position.y + 8.0;
-                    float r = h * 0.35;
-                    float ang = position.x + h * 1.5 + uTime * 0.5;
-                    vec3 foldPos = vec3(sin(ang) * r, position.y, cos(ang) * r);
+
+                    // --- 新的圣诞树形态计算 ---
+                    // 将原始Y坐标映射到 0.0 (底部) 到 1.0 (顶部) 的范围
+                    float hMap = smoothstep(-20.0, 20.0, position.y);
+                    
+                    // 树的实际高度范围：从 Y=-12 到 Y=10
+                    float treeH = hMap * 22.0 - 12.0;
+
+                    // 圆锥体半径控制：底部宽，顶部尖
+                    // baseRadius = 9.0 (底部最大半径)
+                    float baseRadius = (1.0 - hMap) * 9.0;
+                    
+                    // 利用原始位置信息添加噪点，让粒子分布在圆锥体内部，而不是只在表面
+                    // noise 范围大致在 0.5 到 1.5 之间
+                    float noiseR = random(position.xz) * 1.0 + 0.5; 
+                    float r = baseRadius * noiseR;
+                    // 确保顶部收尖
+                    r *= smoothstep(1.0, 0.9, hMap);
+
+                    // 螺旋角度：随高度和时间变化
+                    float ang = atan(position.x, position.z) + hMap * 10.0 + uTime * 0.8;
+
+                    // 计算合拢态位置
+                    vec3 foldPos = vec3(sin(ang) * r, treeH, cos(ang) * r);
+                    
+                    // 混合位置状态
                     vec3 finalPos = mix(foldPos, position, uProgress);
+
                     vec4 mv = modelViewMatrix * vec4(finalPos, 1.0);
-                    gl_PointSize = (15.0 / -mv.z);
+                    
+                    // --- 核心修改：显著增大粒子尺寸 ---
+                    // 基准尺寸从 15.0 提升到 80.0
+                    // 增加 max(6.0, ...) 确保远处或高分屏上至少有 6像素大小
+                    gl_PointSize = max(6.0, (80.0 / -mv.z));
+                    
                     gl_Position = projectionMatrix * mv;
                 }
             `,
             fragmentShader: `
                 varying vec3 vColor;
                 void main() {
-                    if(length(gl_PointCoord - 0.5) > 0.5) discard;
-                    gl_FragColor = vec4(vColor, 1.0);
+                    // 将方形点裁切成圆形，边缘柔化
+                    float d = length(gl_PointCoord - 0.5);
+                    if(d > 0.5) discard;
+                    // 简单的径向渐变让粒子看起来更像发光球体
+                    float alpha = smoothstep(0.5, 0.3, d);
+                    gl_FragColor = vec4(vColor, alpha);
                 }
             `,
             vertexColors: true,
             transparent: true,
-            blending: THREE.AdditiveBlending
+            blending: THREE.AdditiveBlending,
+            depthWrite: false // 关闭深度写入以获得更好的叠加发光效果
         });
 
         particles = new THREE.Points(geometry, mat);
         scene.add(particles);
     }
 
-    // --- 2. 初始化手势识别 ---
+    // --- 2. 初始化手势识别 (保持不变，增加Loading隐藏逻辑) ---
     async function initAI() {
-        const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0");
-        const filesetResolver = await vision.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
-        handLandmarker = await vision.HandLandmarker.createFromOptions(filesetResolver, {
-            baseOptions: {
-                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                delegate: "GPU"
-            },
-            runningMode: "VIDEO", numHands: 1
-        });
-        
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('state-text').innerText = "请举起手掌";
-            predict();
-        };
+        try {
+            const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0");
+            const filesetResolver = await vision.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+            handLandmarker = await vision.HandLandmarker.createFromOptions(filesetResolver, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO", numHands: 1
+            });
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 320, height: 240 } });
+            video.srcObject = stream;
+            video.onloadeddata = () => {
+                const loader = document.getElementById('loader');
+                loader.style.opacity = '0';
+                setTimeout(() => loader.remove(), 500);
+                predict();
+            };
+        } catch (e) {
+            document.getElementById('loader').innerHTML = `<p style="color:red">初始化失败: ${e.message}</p><p>请检查摄像头权限或网络</p>`;
+        }
     }
 
     async function predict() {
-        if (handLandmarker) {
-            const startTimeMs = performance.now();
-            const results = handLandmarker.detectForVideo(video, startTimeMs);
+        if (handLandmarker && video.currentTime > 0) {
+            const results = handLandmarker.detectForVideo(video, performance.now());
             if (results.landmarks && results.landmarks.length > 0) {
                 updateLogic(results.landmarks[0]);
             }
@@ -173,35 +231,43 @@
     }
 
     function updateLogic(landmarks) {
-        // 简单的状态切换：计算食指尖到掌心的距离
+        // 计算食指尖(8)到掌心(0)的距离来判断手掌开合
         const dist = Math.hypot(landmarks[8].x - landmarks[0].x, landmarks[8].y - landmarks[0].y);
         
-        if (dist < 0.25 && currentState !== 'FOLD') {
-            triggerTransition(0);
+        // 调整了阈值以适应不同手型
+        if (dist < 0.3 && currentState !== 'FOLD') {
+            triggerTransition(0); // 合拢
             currentState = 'FOLD';
-            document.getElementById('state-text').innerText = "状态：聚合 (握拳)";
+            document.getElementById('state-text').innerText = "🎄 状态：聚合圣诞树 (握拳)";
         } else if (dist > 0.45 && currentState !== 'SCATTER') {
-            triggerTransition(1);
+            triggerTransition(1); // 散开
             currentState = 'SCATTER';
-            document.getElementById('state-text').innerText = "状态：散开 (张手)";
+            document.getElementById('state-text').innerText = "✨ 状态：炸裂散开 (张手)";
         }
 
-        // 旋转
-        const handX = (landmarks[0].x - 0.5) * 2;
-        scene.rotation.y += (handX * 0.2 - scene.rotation.y) * 0.1;
+        // 旋转控制：使用手掌中心的X坐标
+        const handX = (landmarks[0].x - 0.5) * 3; // 增加灵敏度
+        // 平滑旋转
+        scene.rotation.y += (handX * 0.3 - scene.rotation.y) * 0.08;
     }
 
     function triggerTransition(val) {
         new TWEEN.Tween(particles.material.uniforms.uProgress)
-            .to({ value: val }, 1000)
-            .easing(TWEEN.Easing.Quadratic.Out)
+            .to({ value: val }, 1200) // 稍微延长过渡时间，看起来更魔幻
+            .easing(TWEEN.Easing.Quadratic.InOut)
             .start();
     }
 
     function animate(time) {
         requestAnimationFrame(animate);
         TWEEN.update(time);
-        if(particles) particles.material.uniforms.uTime.value = time * 0.001;
+        if(particles) {
+            particles.material.uniforms.uTime.value = time * 0.0005;
+            // 合拢状态下添加缓慢自转
+            if (currentState === 'FOLD') {
+                 particles.rotation.y += 0.002;
+            }
+        }
         composer.render();
     }
 
@@ -213,6 +279,7 @@
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        composer.setSize(window.innerWidth, window.innerHeight);
     };
 </script>
 </body>

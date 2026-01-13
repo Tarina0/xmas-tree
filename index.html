@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D圣诞树手势交互</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: sans-serif; }
+        #container { width: 100vw; height: 100vh; }
+        
+        /* 手机端摄像头预览窗口：左上角小窗，并镜像 */
+        #video-container { 
+            position: absolute; top: 10px; right: 10px; 
+            width: 100px; height: 75px; 
+            border: 1px solid gold; border-radius: 8px; 
+            overflow: hidden; transform: scaleX(-1); z-index: 100;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        #ui { 
+            position: absolute; bottom: 30px; width: 100%; 
+            text-align: center; color: gold; pointer-events: none; 
+            text-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .hint { font-size: 12px; opacity: 0.8; margin-top: 5px; }
+        
+        /* 加载提示 */
+        #loader {
+            position: fixed; inset: 0; background: #000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 1000; color: gold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loader">
+    <p>正在初始化 3D 引擎...</p>
+    <p style="font-size: 12px;">建议在 Chrome/Safari 中打开</p>
+</div>
+
+<div id="video-container">
+    <video id="webcam" autoplay playsinline></video>
+</div>
+
+<div id="ui">
+    <h2 id="state-text">加载模型中...</h2>
+    <div class="hint">🖐️张开手：散开 | ✊握拳：聚合 | 🔄移动手：旋转</div>
+</div>
+
+<div id="container"></div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import TWEEN from 'https://cdn.jsdelivr.net/npm/@tweenjs/tween.js@23.1.1/dist/tween.esm.js';
+
+    let scene, camera, renderer, composer, particles;
+    let handLandmarker;
+    const video = document.getElementById('webcam');
+    let currentState = 'FOLD';
+
+    // --- 1. 初始化 3D 场景 ---
+    async function initScene() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 20;
+
+        renderer = new THREE.WebGLRenderer({ antialias: false }); // 手机端关闭原生抗锯齿以提升性能
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // 辉光效果
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.8);
+        composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // 粒子系统 (降低数量至1200以适配手机)
+        const count = 1200;
+        const geometry = new THREE.BufferGeometry();
+        const pos = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+        const palette = [new THREE.Color(0xffd700), new THREE.Color(0x1a472a), new THREE.Color(0xbc131f)];
+
+        for (let i = 0; i < count; i++) {
+            pos[i * 3] = (Math.random() - 0.5) * 30;
+            pos[i * 3 + 1] = (Math.random() - 0.5) * 30;
+            pos[i * 3 + 2] = (Math.random() - 0.5) * 30;
+            const c = palette[Math.floor(Math.random() * palette.length)];
+            colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const mat = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uProgress: { value: 0 } },
+            vertexShader: `
+                varying vec3 vColor;
+                uniform float uTime;
+                uniform float uProgress;
+                void main() {
+                    vColor = color;
+                    float h = position.y + 8.0;
+                    float r = h * 0.35;
+                    float ang = position.x + h * 1.5 + uTime * 0.5;
+                    vec3 foldPos = vec3(sin(ang) * r, position.y, cos(ang) * r);
+                    vec3 finalPos = mix(foldPos, position, uProgress);
+                    vec4 mv = modelViewMatrix * vec4(finalPos, 1.0);
+                    gl_PointSize = (15.0 / -mv.z);
+                    gl_Position = projectionMatrix * mv;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vColor;
+                void main() {
+                    if(length(gl_PointCoord - 0.5) > 0.5) discard;
+                    gl_FragColor = vec4(vColor, 1.0);
+                }
+            `,
+            vertexColors: true,
+            transparent: true,
+            blending: THREE.AdditiveBlending
+        });
+
+        particles = new THREE.Points(geometry, mat);
+        scene.add(particles);
+    }
+
+    // --- 2. 初始化手势识别 ---
+    async function initAI() {
+        const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0");
+        const filesetResolver = await vision.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+        handLandmarker = await vision.HandLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                delegate: "GPU"
+            },
+            runningMode: "VIDEO", numHands: 1
+        });
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('state-text').innerText = "请举起手掌";
+            predict();
+        };
+    }
+
+    async function predict() {
+        if (handLandmarker) {
+            const startTimeMs = performance.now();
+            const results = handLandmarker.detectForVideo(video, startTimeMs);
+            if (results.landmarks && results.landmarks.length > 0) {
+                updateLogic(results.landmarks[0]);
+            }
+        }
+        requestAnimationFrame(predict);
+    }
+
+    function updateLogic(landmarks) {
+        // 简单的状态切换：计算食指尖到掌心的距离
+        const dist = Math.hypot(landmarks[8].x - landmarks[0].x, landmarks[8].y - landmarks[0].y);
+        
+        if (dist < 0.25 && currentState !== 'FOLD') {
+            triggerTransition(0);
+            currentState = 'FOLD';
+            document.getElementById('state-text').innerText = "状态：聚合 (握拳)";
+        } else if (dist > 0.45 && currentState !== 'SCATTER') {
+            triggerTransition(1);
+            currentState = 'SCATTER';
+            document.getElementById('state-text').innerText = "状态：散开 (张手)";
+        }
+
+        // 旋转
+        const handX = (landmarks[0].x - 0.5) * 2;
+        scene.rotation.y += (handX * 0.2 - scene.rotation.y) * 0.1;
+    }
+
+    function triggerTransition(val) {
+        new TWEEN.Tween(particles.material.uniforms.uProgress)
+            .to({ value: val }, 1000)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .start();
+    }
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        TWEEN.update(time);
+        if(particles) particles.material.uniforms.uTime.value = time * 0.001;
+        composer.render();
+    }
+
+    initScene();
+    initAI();
+    animate();
+
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+</script>
+</body>
+</html>
